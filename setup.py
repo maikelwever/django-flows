@@ -6,10 +6,10 @@ import time
 
 _version = "1.1.1"
 _packages = find_packages(exclude=["*.tests", "*.tests.*", "tests.*", "tests", "example"])
-    
+
 # common dependencies
 _install_requires = [
-            'django>=1.4,<1.7',
+            'django>=1.4,<1.9',  # StateModel can't be migration but /care
        ]
 
 _short_description = "django-flows keeps state and position in complicated flows of logic, allowing optional " \
