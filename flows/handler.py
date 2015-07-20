@@ -17,8 +17,12 @@ import logging
 import re
 import uuid
 from flows.binder import binder
-import urlparse
 import urllib
+
+try:
+    import urlparse
+except ImportError:
+    from urllib import parse as urlparse
 
 
 logger = logging.getLogger(__name__)
@@ -28,7 +32,7 @@ try:
     has_pydot = True
 except ImportError:
     has_pydot = False
-    
+
 
 
 class FlowHandlerBase(object):
@@ -75,39 +79,39 @@ class FlowHandler(FlowHandlerBase):
         self._entry_points = []
         self.app_namespace = app_namespace
         self.state_store = state_store or default_state_store
-        
-    
+
+
     def _get_state(self, task_id):
-        
+
         if not re.match('^[0-9a-f]{32}$', task_id):
             # someone is messing with the task ID - don't even try
             # to do anything with it
             raise StateNotFound
-        
+
         return self.state_store.get_state(task_id)
 
-    
+
     def _view(self, position):
-        
+
         def handle_view(request, *args, **kwargs):
             # first get the state for this task, or create state if
             # this is an entry point with no state
             if config.FLOWS_TASK_ID_PARAM in request.REQUEST:
                 task_id = request.REQUEST[config.FLOWS_TASK_ID_PARAM]
-                
+
                 try:
                     state = self._get_state(task_id)
                 except StateNotFound:
                     logger.debug("Could not find task with ID %s" % task_id)
                     raise Http404
-                
+
                 bound_to = state.get('_bound_to', None)
                 bind_to = binder(request)
-                
+
                 if bound_to is None or bind_to is None or bind_to != bound_to:
                     logger.debug('Will not give task %s as it is bound to %s, not %s' % (task_id, bound_to, bind_to))
                     raise Http404
-                
+
             else:
                 # are we at an entry point? if so, then create some new state
                 # otherwise we're trying to enter the middle of a flow, which
@@ -120,41 +124,41 @@ class FlowHandler(FlowHandlerBase):
                 else:
                     logger.debug('Flow position is not an entry point: %s' % position)
                     raise Http404
-                
-            # create the instances required to handle the request 
+
+            # create the instances required to handle the request
             flow_instance = position.create_instance(state, self.state_store, args, kwargs)
-                
+
             # deal with the request
             return flow_instance.handle(request, *args, **kwargs)
 
         return handle_view
-    
+
     def _new_state(self, request, **initial_state):
         task_id = re.sub('-', '', str(uuid.uuid4()))
         bind_to = binder(request)
         if bind_to is None:
             raise ImproperlyConfigured('A value is required to bind the task to')
-        
+
         state = {'_id': task_id, '_bound_to': bind_to}
         state.update( initial_state )
         self.state_store.put_state(task_id, state)
-        
+
         return state
-    
+
     def _urls_for_flow(self, flow_namespace, flow_component, flow_position=None):
 
         urlpatterns = []
-                
+
         if flow_position is None:
             flow_position = PossibleFlowPosition(self.app_namespace, flow_namespace, [flow_component])
         else:
             flow_position = PossibleFlowPosition(self.app_namespace, flow_namespace, flow_position.flow_component_classes + [flow_component])
-        
+
         if hasattr(flow_component, 'urls'):
             flow_urls = flow_component.urls
         else:
             flow_urls = [flow_component.url]
-            
+
         if issubclass(flow_component, Scaffold) and hasattr(flow_component, 'action_set'):
             for child in flow_component.action_set:
                 for u in flow_urls:
@@ -172,38 +176,38 @@ class FlowHandler(FlowHandlerBase):
 
     def register_entry_point(self, flow_component):
         self._entry_points.append(flow_component)
-        
+
     def _add_flow_nodes(self, graph, component, root=None, depth=0):
-        
+
         name = '%s - %s' % (depth, component.__name__)
         if hasattr(component, 'url'):
             urls = [component.url]
         elif hasattr(component, 'urls'):
             urls = component.urls
-            
+
         urls = ['<empty>' if u is '' else u for u in urls]
         name = "%s\n%s" % (name, '\n'.join(urls))
-            
+
         graph.add_node(pydot.Node(name))
         if root:
             graph.add_edge(pydot.Edge(root, name))
-            
+
         for fc in getattr(component, 'action_set', []):
             self._add_flow_nodes(graph, fc, root=name, depth=depth+1)
-        
+
     def flow_graph(self, request):
         if not has_pydot:
             raise ImproperlyConfigured('The pydot library is required to see flowgraph debug output')
-        
+
         graph = pydot.Dot(graph_type='graph')
-        
+
         for flow in self._entry_points:
             self._add_flow_nodes(graph, flow)
-            
+
         data = graph.create_png()
-        
+
         return HttpResponse(data, content_type='image/png')
-        
+
     def flow_entry_link(self, request, flow_class_or_name, on_complete_url=None,
                         with_state=False, initial_state=None,
                         flow_namespace=None,
@@ -280,7 +284,7 @@ class FlowHandler(FlowHandlerBase):
             with_state = True
 
         flow_class = get_by_class_or_name(flow_class_or_name)
-        
+
         position = PossibleFlowPosition(self.app_namespace, flow_namespace, flow_class.get_initial_action_tree())
 
         if with_state:
@@ -308,7 +312,7 @@ class FlowHandler(FlowHandlerBase):
         parts[4] = urllib.urlencode(query, doseq=True)
 
         return urlparse.urlunparse(parts)
-        
+
     def list_urls(self, urllist, prefix=''):
         urls = []
         for entry in urllist:
@@ -317,15 +321,15 @@ class FlowHandler(FlowHandlerBase):
                 urls += self.list_urls(entry.url_patterns, prefix+entry.regex.pattern)
             else:
                 urls.append(prefix + entry.regex.pattern)
-        return urls 
-        
+        return urls
+
     def get_urls(self, flow_namespace=None):
         return self._get_url_patterns(flow_namespace)
-        
+
     @property
     def urls(self):
         return self.get_urls(None)
-    
+
     def _get_url_patterns(self, flow_namespace):
         urlpatterns = []
         for flow in self._entry_points:
@@ -333,7 +337,7 @@ class FlowHandler(FlowHandlerBase):
         if settings.DEBUG:
             prefix = flow_namespace if flow_namespace else ''
             urlpatterns += patterns('', url('%s\.flowgraph$' % prefix, self.flow_graph))
-            
+
         # verify that URLs are unique
         url_list = self.list_urls(urlpatterns)
         url_set = set()
@@ -342,16 +346,16 @@ class FlowHandler(FlowHandlerBase):
             if url_entry in url_set:
                 raise ImproperlyConfigured('Url is not unique: %s' % url_entry)
             url_set.add(url_entry)
-        
+
         return urlpatterns
 
 
 class FlowPositionInstance(object):
     """
-    A FlowPositionInstance represents a concrete instance of a PossibleFlowPosition - 
+    A FlowPositionInstance represents a concrete instance of a PossibleFlowPosition -
     that is, a user is currently performing an action as part of a flow
     """
-    
+
     def __init__(self, app_namespace, flow_namespace, position, state, state_store, url_args, url_kwargs):
         self._app_namespace = app_namespace
         self._flow_namespace = flow_namespace
@@ -362,7 +366,7 @@ class FlowPositionInstance(object):
 
         self._url_args = url_args or []
         self._url_kwargs = url_kwargs or {}
-        
+
         for flow_component_class in self._position.flow_component_classes:
             flow_component = flow_component_class()
             flow_component._flow_position_instance = self
@@ -371,31 +375,31 @@ class FlowPositionInstance(object):
             flow_component.task_id = self.task_id
             flow_component.app_namespace = self._app_namespace
             flow_component.flow_namespace = self._flow_namespace
-            
+
             self._flow_components.append( flow_component )
-            
-        self._history = FlowHistory(self)    
-            
+
+        self._history = FlowHistory(self)
+
         self._validate()
-        
+
     def _validate(self):
         pass
         # TODO: assert that only the last element is an Action and that the
         # rest are Scaffolds
-        
+
     @property
     def task_id(self):
         return self._state['_id']
-            
+
     def get_root_component(self):
         return self._flow_components[0]
-    
+
     def get_action(self):
         return self._flow_components[-1]
-    
+
     def get_back_url(self):
         return self._history.get_back_url()
-    
+
     def get_absolute_url(self, include_flow_id=True):
         args = []
         kwargs = {}
@@ -403,15 +407,15 @@ class FlowPositionInstance(object):
             flow_args, flow_kwargs = flow_component.get_url_args()
             args += flow_args
             kwargs.update(flow_kwargs)
-            
+
         url_name = self._position.url_name
         url = reverse(url_name, args=args, kwargs=kwargs)
-        
+
         if include_flow_id:
-        
+
             separator = '&' if '?' in url else '?'
-            
-            return '%(root)s%(url)s%(separator)s%(task_id_param_name)s=%(task_id)s' % { 
+
+            return '%(root)s%(url)s%(separator)s%(task_id_param_name)s=%(task_id)s' % {
                                      'root': config.FLOWS_SITE_ROOT,
                                      'url': url, 'separator': separator,
                                      'task_id_param_name': config.FLOWS_TASK_ID_PARAM,
@@ -422,7 +426,7 @@ class FlowPositionInstance(object):
     def position_instance_for(self, component_class_or_name):
         # figure out where we're being sent to
         FC = get_by_class_or_name(component_class_or_name)
-        
+
         # it should be a sibling of one of the current items
         # for example, if we are in position [A,B,E]:
         #
@@ -431,7 +435,7 @@ class FlowPositionInstance(object):
         #    B    C   D
         #   /  \      |  \
         #  E   F      G   H
-        # 
+        #
         #  E can send to F (its own sibling) or C (sibling of its parent)
 
         for fci in self._flow_components[-2::-1]: # go backwards but skip the last element (the action)
@@ -447,20 +451,20 @@ class FlowPositionInstance(object):
         # coupled with the initial subtree from the component we're tring to redirect
         # to
         tree_root = self._position.flow_component_classes[:idx+1]
-        
+
         # figure out the action tree for the new first component - either
         # we have been given an action, in which case it's just one single
         # item, or we have been given a scaffold, in which case there could
         # be a list of [scaffold, scaffold..., action]
         new_subtree = FC.get_initial_action_tree()
-        
-        # we use our current tree and replace the current leaf with this new 
+
+        # we use our current tree and replace the current leaf with this new
         # subtree to get the new position
         new_position = PossibleFlowPosition(self._app_namespace, self._flow_namespace, tree_root + new_subtree)
-        
+
         # now create an instance of the position with the current state
         return new_position.create_instance(self._state, self.state_store, self._url_args, self._url_kwargs)
-    
+
     def handle(self, request, *args, **kwargs):
         # first validate that we can actually run by checking for
         # required state, for example
@@ -469,7 +473,7 @@ class FlowPositionInstance(object):
             response = flow_component.check_preconditions(request)
             if response is not None:
                 break
-        
+
         if response is None:
             # now call each of the prepare methods for the components
             for flow_component in self._flow_components:
@@ -479,7 +483,7 @@ class FlowPositionInstance(object):
                     # we allow prepare methods to give out responses if they
                     # want to, eg, redirect
                     break
-                
+
         if response is None:
 
             # FIXME: mjtamlyn promises to fix this in Django 1.7, but right now we need
@@ -494,17 +498,17 @@ class FlowPositionInstance(object):
 
             # now that everything is set up, we can handle the request
             response = self.get_action().dispatch(request, *args, **kwargs)
-            
+
             # if this is a GET request, then we displayed something to the user, so
-            # we should record this in the history, unless the request returned a 
+            # we should record this in the history, unless the request returned a
             # redirect, in which case we haven't displayed anything
             if request.method == 'GET' and not isinstance(response, HttpResponseRedirect):
                 self._history.add_to_history(self)
-        
+
         # now we have a response, we need to decide what to do with it
         for flow_component in self._flow_components[::-1]: # go from leaf to root, ie, backwards
             response = flow_component.handle_response(response)
-            
+
         # now we have some kind of response, figure out what it is exactly
         if response == COMPLETE:
             # this means that the entire flow finished - we should redirect
@@ -518,38 +522,38 @@ class FlowPositionInstance(object):
 
             # if we are done, then we should remove the task state
             self.state_store.delete_state(self.task_id)
-            
+
         else:
             # update the state if necessary
             self.state_store.put_state(self.task_id, self._state)
-            
+
             if inspect.isclass(response):
                 # we got given a class, which implies the code should redirect
                 # to this new (presumably Action) class
-                response = redirect(self.position_instance_for(response).get_absolute_url()) 
-            
+                response = redirect(self.position_instance_for(response).get_absolute_url())
+
             elif isinstance(response, Action):
                 # this is a new action for the user, so redirect to it
                 absurl = response.get_absolute_url()
                 response = redirect(absurl)
-               
+
             elif isinstance(response, basestring):
                 # this is a string which should be the name of an action
                 # which couldn't be referenced as a class for some reason
                 flow_component = get_by_class_or_name(response)
-                response = redirect(flow_component.get_absolute_url()) 
+                response = redirect(flow_component.get_absolute_url())
 
         return response
-    
+
     def __repr__(self):
         return 'Instance of %s' % self._position.__repr__()
-        
-    
+
+
 class PossibleFlowPosition(object):
     all_positions = {}
-    
+
     """
-    A PossibleFlowPosition represents a possible position in a hierachy of 
+    A PossibleFlowPosition represents a possible position in a hierachy of
     flow components. On startup, all FlowComponents (Scaffolds and Actions)
     are inspected to build up a list of all possible positions within all
     avaiable flows. This class represents one such possibility.
@@ -561,11 +565,11 @@ class PossibleFlowPosition(object):
         self.flow_component_classes = flow_components
 
         PossibleFlowPosition.all_positions[self.url_name] = self
-            
+
     def create_instance(self, state, state_store, url_args, url_kwargs):
         return FlowPositionInstance(self.app_namespace, self.flow_namespace, self, state,
                                     state_store, url_args, url_kwargs)
-    
+
     def _url_name_from_components(self, components, include_app_namespace=True):
         if self.flow_namespace is None:
             prefix = 'flow_'
@@ -574,21 +578,21 @@ class PossibleFlowPosition(object):
         if self.app_namespace and include_app_namespace:
             prefix = '%s:%s' % (self.app_namespace, prefix)
         return '%s%s' % (prefix, '/'.join([name_for_flow(fc) for fc in components]))
-    
+
     def is_entry_point(self):
         root_tree = self.flow_component_classes[0].get_initial_action_tree()
         my_tree = self.flow_component_classes
         return root_tree == my_tree
-    
+
     @property
     def url_name(self):
         return self.get_url_name(include_app_namespace=True)
-    
+
     def get_url_name(self, include_app_namespace=True):
         return self._url_name_from_components(self.flow_component_classes, include_app_namespace)
-    
-    
+
+
     def __repr__(self):
         classes = ' / '.join( map(str, self.flow_component_classes) )
         return '%s (%s)' % (classes, self.url_name)
-    
+
