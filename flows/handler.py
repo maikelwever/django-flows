@@ -27,11 +27,16 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+has_pydot = False
 try:
     import pydot
     has_pydot = True
 except ImportError:
-    has_pydot = False
+    try:
+        import pydotplus as pydot
+        has_pydot = True
+    except ImportError:
+        pass
 
 
 
