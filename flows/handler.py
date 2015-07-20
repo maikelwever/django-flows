@@ -25,6 +25,13 @@ except ImportError:
     from urllib import parse as urlparse
 
 
+try:
+    unicode = unicode
+except NameError:
+    unicode = str
+    basestring = (str, bytes)
+
+
 logger = logging.getLogger(__name__)
 
 has_pydot = False
